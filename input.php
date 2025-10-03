@@ -3,86 +3,94 @@
 /**
  * PHP Step Essentials - Input/Output Helper Functions
  * Equivalent to the Go step-essentials/io library
+ * 
+ * Enhanced for Visual Go workflow engine compatibility.
+ * This library handles all input parsing and output formatting,
+ * maintaining repository integrity without external file injection.
  */
 
 /**
  * GetInputs parses command line arguments and returns associative array
  * Supports both --inputs YAML and --inputs-file path formats
+ * Compatible with Visual Go workflow engine input format
  */
+
+// GetInputs() parses the --inputs YAML argument or --inputs-file and returns associative array
 function GetInputs() {
-    global $argv;
-    
+    $options = getopt("", ["inputs:", "inputs-file:"]);
     $inputs = [];
     
-    for ($i = 1; $i < count($argv); $i++) {
-        if ($argv[$i] === '--inputs' && isset($argv[$i + 1])) {
-            // Parse YAML from command line argument
-            $yamlContent = $argv[$i + 1];
-            $inputs = parseSimpleYaml($yamlContent);
-            break;
-        } elseif ($argv[$i] === '--inputs-file' && isset($argv[$i + 1])) {
-            // Read and parse YAML from file
-            $filePath = $argv[$i + 1];
-            if (file_exists($filePath)) {
-                $yamlContent = file_get_contents($filePath);
-                $inputs = parseSimpleYaml($yamlContent);
+    // Priority: file input over inline input (for large data)
+    if (isset($options['inputs-file'])) {
+        // Read inputs from file
+        $inputsFile = $options['inputs-file'];
+        if (file_exists($inputsFile)) {
+            $yamlContent = file_get_contents($inputsFile);
+            if ($yamlContent !== false) {
+                $inputs = parseSimpleYAML($yamlContent);
+            } else {
+                echo "Error reading inputs file $inputsFile\n";
+                return [];
             }
-            break;
+        } else {
+            echo "Inputs file $inputsFile not found\n";
+            return [];
         }
+    } elseif (isset($options['inputs'])) {
+        // Read inputs from inline YAML
+        $yamlContent = $options['inputs'];
+        $inputs = parseSimpleYAML($yamlContent);
     }
     
-    return $inputs;
+    return $inputs ?: [];
 }
 
-/**
- * SetOutputs formats associative array as YAML and outputs to stdout
- * This output is captured by the workflow engine
- */
-function SetOutputs($outputs) {
-    echo formatAsYaml($outputs);
-}
-
-/**
- * Simple YAML parser for basic key-value pairs and arrays
- * Handles the common patterns used in workflow inputs/outputs
- */
-function parseSimpleYaml($yamlContent) {
+// Simple YAML parser for basic key-value pairs and arrays
+function parseSimpleYAML($yamlContent) {
     $result = [];
     $lines = explode("\n", trim($yamlContent));
     
     foreach ($lines as $line) {
         $line = trim($line);
-        if (empty($line) || strpos($line, '#') === 0) continue;
+        if (empty($line) || strpos($line, '#') === 0) {
+            continue;
+        }
         
         if (strpos($line, ':') !== false) {
-            // Split only on the first colon to handle array values correctly
-            $colonPos = strpos($line, ':');
-            $key = trim(substr($line, 0, $colonPos));
-            $value = trim(substr($line, $colonPos + 1));
+            list($key, $value) = explode(':', $line, 2);
+            $key = trim($key);
+            $value = trim($value);
             
-            // Handle arrays in YAML format [1, 2, 3]
-            if (preg_match('/^\[(.*?)\]$/', $value, $matches)) {
-                $arrayStr = $matches[1];
-                if (!empty($arrayStr)) {
-                    $result[$key] = array_map(function($v) {
-                        $v = trim($v);
-                        return is_numeric($v) ? (strpos($v, '.') !== false ? floatval($v) : intval($v)) : $v;
-                    }, explode(',', $arrayStr));
+            // Handle arrays
+            if (preg_match('/^\[(.*)\]$/', $value, $matches)) {
+                $arrayContent = trim($matches[1]);
+                if (!empty($arrayContent)) {
+                    $elements = explode(',', $arrayContent);
+                    $array = [];
+                    foreach ($elements as $element) {
+                        $element = trim($element, ' "\'');
+                        if (is_numeric($element)) {
+                            $array[] = strpos($element, '.') !== false ? (float)$element : (int)$element;
+                        } else {
+                            $array[] = $element;
+                        }
+                    }
+                    $result[$key] = $array;
                 } else {
                     $result[$key] = [];
                 }
-            }
-            // Handle numeric values
-            elseif (is_numeric($value)) {
-                $result[$key] = strpos($value, '.') !== false ? floatval($value) : intval($value);
-            }
-            // Handle boolean values
-            elseif (in_array(strtolower($value), ['true', 'false'])) {
-                $result[$key] = strtolower($value) === 'true';
-            }
-            // Handle string values (remove quotes if present)
-            else {
-                $result[$key] = trim($value, '"\'\'');
+            } else {
+                // Handle scalar values
+                $value = trim($value, '"\'');
+                if ($value === 'true') {
+                    $result[$key] = true;
+                } elseif ($value === 'false') {
+                    $result[$key] = false;
+                } elseif (is_numeric($value)) {
+                    $result[$key] = strpos($value, '.') !== false ? (float)$value : (int)$value;
+                } else {
+                    $result[$key] = $value;
+                }
             }
         }
     }
@@ -90,34 +98,41 @@ function parseSimpleYaml($yamlContent) {
     return $result;
 }
 
-/**
- * Format associative array as YAML output
- * Generates YAML format that the workflow engine can parse
- */
-function formatAsYaml($data) {
-    $yaml = "";
-    
-    foreach ($data as $key => $value) {
+// SetOutputs() converts an associative array to YAML format and prints it as outputs
+function SetOutputs($outputs) {
+    echo "outputs:\n";
+    foreach ($outputs as $key => $value) {
         if (is_array($value)) {
-            // Format arrays as [1, 2, 3]
-            $arrayStr = '[' . implode(', ', $value) . ']';
-            $yaml .= "$key: $arrayStr\n";
+            // Handle arrays
+            $arrayStr = '[';
+            $first = true;
+            foreach ($value as $item) {
+                if (!$first) $arrayStr .= ', ';
+                if (is_string($item)) {
+                    $arrayStr .= '"' . addslashes($item) . '"';
+                } else {
+                    $arrayStr .= $item;
+                }
+                $first = false;
+            }
+            $arrayStr .= ']';
+            echo "  $key: $arrayStr\n";
         } elseif (is_bool($value)) {
-            $yaml .= "$key: " . ($value ? 'true' : 'false') . "\n";
+            echo "  $key: " . ($value ? 'true' : 'false') . "\n";
         } elseif (is_string($value)) {
-            // Escape strings that contain special characters
-            if (preg_match('/[:\n\r\t]/', $value)) {
-                $escaped = addslashes($value);
-                $yaml .= "$key: \"$escaped\"\n";
+            // Escape quotes and handle multiline strings
+            if (strpos($value, "\n") !== false) {
+                echo "  $key: |\n";
+                $lines = explode("\n", $value);
+                foreach ($lines as $line) {
+                    echo "    $line\n";
+                }
             } else {
-                $yaml .= "$key: $value\n";
+                echo "  $key: \"" . addslashes($value) . "\"\n";
             }
         } else {
-            $yaml .= "$key: $value\n";
+            echo "  $key: $value\n";
         }
     }
-    
-    return $yaml;
 }
-
 ?>
