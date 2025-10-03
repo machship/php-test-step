@@ -1,0 +1,38 @@
+{
+    "name": "machship/php-test-step",
+    "description": "PHP test step for Visual Go workflow automation",
+    "type": "library",
+    "license": "MIT",
+    "version": "1.0.0",
+    "authors": [
+        {
+            "name": "Visual Go Team",
+            "email": "dev@machship.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.0"
+    },
+    "autoload": {
+        "files": [
+            "input.php",
+            "utils.php"
+        ],
+        "classmap": [
+            "processor.php"
+        ]
+    },
+    "scripts": {
+        "test": "phpunit tests/",
+        "run": "php main.php"
+    },
+    "keywords": [
+        "workflow",
+        "automation",
+        "step",
+        "processing"
+    ]
+}
